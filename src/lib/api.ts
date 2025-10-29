@@ -1,4 +1,6 @@
-const API_BASE_URL = 'https://lamar-backend-api.onrender.com/api';
+// Get API base URL from environment variable with fallback for local development
+const API_BASE_URL =
+  (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000') + '/api';
 
 export interface PatientOrderPayload {
   first_name: string;
