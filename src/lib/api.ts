@@ -39,6 +39,44 @@ export interface PatientOrderResponse {
   order_id: number;
 }
 
+export async function downloadCarePlan(
+  patientId: number,
+  orderId: number
+): Promise<Blob> {
+  const API_BASE_URL =
+    typeof window !== 'undefined' && window.location.hostname === 'localhost'
+      ? 'http://localhost:8000/api'
+      : import.meta.env.VITE_API_BASE_URL || 'https://lamar-backend-api.onrender.com/api';
+
+  const response = await fetch(
+    `${API_BASE_URL}/patients/${patientId}/orders/${orderId}/care-plan`,
+    {
+      method: 'GET',
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    let errorMessage = 'Failed to generate care plan';
+    
+    try {
+      const errorData = JSON.parse(errorText);
+      errorMessage = errorData.error || errorMessage;
+    } catch {
+      errorMessage = errorText || errorMessage;
+    }
+
+    const error: ApiError = {
+      message: errorMessage,
+      detail: errorText,
+    };
+    throw error;
+  }
+
+  // Return the blob for download
+  return await response.blob();
+}
+
 export interface ValidationError {
   type: string;
   loc: (string | number)[];

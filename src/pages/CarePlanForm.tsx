@@ -22,7 +22,7 @@ const formSchema = z.object({
     .regex(/^\d{6}$/, 'MRN must be exactly 6 digits'),
   primary_diagnosis: z.string().min(1, 'Primary diagnosis is required'),
   additional_diagnoses: z.array(z.string()).optional(),
-  records_text: z.string().min(1, 'Records text is required'),
+  records_text: z.string(),
 
   // Referring Provider
   referring_provider: z.string().min(1, 'Provider name is required'),
@@ -39,7 +39,7 @@ const formSchema = z.object({
 type FormData = z.infer<typeof formSchema>;
 
 export function CarePlanForm() {
-  const { mutate, isLoading, error, confirmationError, setConfirmationError } = useCreatePatientOrder();
+  const { mutate, downloadCarePlanFile, isLoading, isGeneratingCarePlan, error, confirmationError, setConfirmationError } = useCreatePatientOrder();
   const {
     register,
     handleSubmit,
@@ -52,6 +52,7 @@ export function CarePlanForm() {
     defaultValues: {
       additional_diagnoses: [],
       medication_history: [],
+      records_text: '',
     },
   });
 
@@ -61,7 +62,7 @@ export function CarePlanForm() {
   // Track if we just submitted to distinguish between confirmation-needed vs success
   const hasJustSubmittedRef = useRef(false);
 
-  // Watch for confirmationError to prevent form reset
+  // Watch for confirmationError to prevent form reset and auto-trigger care plan download
   useEffect(() => {
     // If we just submitted and confirmationError was set, don't reset the form
     if (hasJustSubmittedRef.current && confirmationError) {
@@ -73,10 +74,29 @@ export function CarePlanForm() {
     // If we just submitted and no confirmationError, it was successful
     if (hasJustSubmittedRef.current && !confirmationError && !isLoading) {
       hasJustSubmittedRef.current = false;
+      
+      // Auto-trigger care plan generation after successful order
+      // We need to get patient_id and order_id from the mutation response
+      // Store them temporarily for care plan download
+      const storedResponse = sessionStorage.getItem('lastOrderResponse');
+      if (storedResponse) {
+        try {
+          const { patient_id, order_id } = JSON.parse(storedResponse);
+          // Automatically download care plan
+          downloadCarePlanFile(patient_id, order_id).catch((err) => {
+            console.error('Auto-care plan download failed:', err);
+            // Don't block form reset if care plan download fails
+          });
+          sessionStorage.removeItem('lastOrderResponse');
+        } catch (err) {
+          console.error('Failed to parse stored order response:', err);
+        }
+      }
+      
       reset();
       setConfirmationError(null);
     }
-  }, [confirmationError, isLoading, reset, setConfirmationError]);
+  }, [confirmationError, isLoading, reset, setConfirmationError, downloadCarePlanFile]);
 
   const submitForm = async (
     data: FormData, 
@@ -101,17 +121,27 @@ export function CarePlanForm() {
           data.medication_history && data.medication_history.length > 0
             ? data.medication_history
             : undefined,
-        records_text: data.records_text,
+        records_text: data.records_text || '',
         confirm_patient_name_mismatch: confirmPatientMismatch,
         confirm_provider_name_mismatch: confirmProviderMismatch,
         confirm_duplicate_order: confirmDuplicateOrder,
       };
 
       hasJustSubmittedRef.current = true;
-      await mutate(payload);
+      const response = await mutate(payload);
+      
+      // Store response for care plan auto-download in useEffect
+      if (response) {
+        sessionStorage.setItem('lastOrderResponse', JSON.stringify({
+          patient_id: response.patient_id,
+          order_id: response.order_id
+        }));
+      }
+      
       // Don't reset here - let useEffect handle it based on confirmationError state
     } catch (err) {
       hasJustSubmittedRef.current = false;
+      sessionStorage.removeItem('lastOrderResponse');
       // Error handling is done in the hook
       console.error('Form submission error:', err);
     }
@@ -178,7 +208,7 @@ export function CarePlanForm() {
         <div className="absolute top-20 -left-20 w-80 h-80 bg-gradient-to-br from-pink-200/20 to-purple-200/20 rounded-full blur-3xl"></div>
       </div>
 
-      <div className="container mx-auto max-w-3xl py-12 px-4 relative z-10">
+      <div className="w-full max-w-4xl mx-auto py-12 px-4 relative z-10">
         <div className="mb-8 text-center">
           <img
             src="/lamarhealth.png"
@@ -188,7 +218,7 @@ export function CarePlanForm() {
         </div>
 
         {/* Main form card */}
-        <div className="bg-white rounded-xl shadow-lg p-8 border border-gray-100">
+        <div className="bg-white rounded-xl shadow-lg p-8 border border-gray-100 w-full">
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
             {/* Patient Information */}
             <div className="space-y-4">
@@ -199,7 +229,7 @@ export function CarePlanForm() {
               <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="first_name" className="text-lamar-charcoal font-medium">
+                    <Label htmlFor="first_name" className="text-lamar-charcoal font-medium text-left block">
                       First Name <span className="text-destructive">*</span>
                     </Label>
                     <Input
@@ -216,7 +246,7 @@ export function CarePlanForm() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="last_name" className="text-lamar-charcoal font-medium">
+                    <Label htmlFor="last_name" className="text-lamar-charcoal font-medium text-left block">
                       Last Name <span className="text-destructive">*</span>
                     </Label>
                     <Input
@@ -234,7 +264,7 @@ export function CarePlanForm() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="mrn" className="text-lamar-charcoal font-medium">
+                  <Label htmlFor="mrn" className="text-lamar-charcoal font-medium text-left block">
                     MRN (6 digits) <span className="text-destructive">*</span>
                   </Label>
                   <Input
@@ -250,7 +280,7 @@ export function CarePlanForm() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="primary_diagnosis" className="text-lamar-charcoal font-medium">
+                  <Label htmlFor="primary_diagnosis" className="text-lamar-charcoal font-medium text-left block">
                     Primary Diagnosis (ICD-10) <span className="text-destructive">*</span>
                   </Label>
                   <Input
@@ -267,7 +297,7 @@ export function CarePlanForm() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label className="text-lamar-charcoal font-medium">Additional Diagnoses (ICD-10)</Label>
+                  <Label className="text-lamar-charcoal font-medium text-left block">Additional Diagnoses (ICD-10)</Label>
                   <div className="space-y-2">
                 {additionalDiagnoses.map((diagnosis, index) => (
                   <div key={index} className="flex gap-2">
@@ -302,8 +332,8 @@ export function CarePlanForm() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="records_text" className="text-lamar-charcoal font-medium">
-                    Records Text <span className="text-destructive">*</span>
+                  <Label htmlFor="records_text" className="text-lamar-charcoal font-medium text-left block">
+                    Records Text
                   </Label>
                   <Textarea
                     id="records_text"
@@ -329,7 +359,7 @@ export function CarePlanForm() {
               </div>
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="referring_provider" className="text-lamar-charcoal font-medium">
+                  <Label htmlFor="referring_provider" className="text-lamar-charcoal font-medium text-left block">
                     Provider Name <span className="text-destructive">*</span>
                   </Label>
                   <Input
@@ -346,7 +376,7 @@ export function CarePlanForm() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="provider_npi" className="text-lamar-charcoal font-medium">
+                  <Label htmlFor="provider_npi" className="text-lamar-charcoal font-medium text-left block">
                     NPI (10 digits) <span className="text-destructive">*</span>
                   </Label>
                   <Input
@@ -361,10 +391,6 @@ export function CarePlanForm() {
                       {errors.provider_npi.message}
                     </p>
                   )}
-                  <p className="text-xs text-muted-foreground">
-                    A duplicate warning will be shown if this NPI already exists in
-                    the database.
-                  </p>
                 </div>
               </div>
             </div>
@@ -377,7 +403,7 @@ export function CarePlanForm() {
               </div>
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="medication_name" className="text-lamar-charcoal font-medium">
+                  <Label htmlFor="medication_name" className="text-lamar-charcoal font-medium text-left block">
                     Medication Name <span className="text-destructive">*</span>
                   </Label>
                   <Input
@@ -394,7 +420,7 @@ export function CarePlanForm() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label className="text-lamar-charcoal font-medium">Medication History</Label>
+                  <Label className="text-lamar-charcoal font-medium text-left block">Medication History</Label>
                   <div className="space-y-2">
                 {medicationHistory.map((medication, index) => (
                   <div key={index} className="flex gap-2">
@@ -460,6 +486,23 @@ export function CarePlanForm() {
           </div>
         </div>
         
+        {/* Care Plan Generation Loading Modal */}
+        {isGeneratingCarePlan && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6 border border-gray-200">
+              <div className="flex flex-col items-center justify-center space-y-4">
+                <Loader2 className="h-12 w-12 animate-spin text-lamar-pink" />
+                <h3 className="text-xl font-semibold text-lamar-charcoal">
+                  Generating Care Plan
+                </h3>
+                <p className="text-sm text-lamar-grey text-center">
+                  Please wait while we generate your care plan. This may take a few moments.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Confirmation Modal for Multiple Issues */}
         {confirmationError && confirmationError.issues && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
