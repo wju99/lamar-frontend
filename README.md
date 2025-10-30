@@ -1,73 +1,57 @@
-# React + TypeScript + Vite
+# Lamar Frontend (React + Vite + TypeScript)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Frontend for the Lamar Health care plan intake app. Collects patient/provider/order data, supports PDF upload for patient records (drag & drop), handles confirmation modals, and downloads generated care plans as .txt.
 
-Currently, two official plugins are available:
+## Tech
+- React 19 + Vite
+- TypeScript
+- React Hook Form + Zod
+- Tailwind CSS + shadcn/ui primitives
+- react-dropzone (PDF upload)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Quick Start
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Local dev URLs:
+- App: http://localhost:5173
+- Backend (local): http://localhost:8000/api
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+The app auto-selects the local backend when running on localhost, otherwise uses `VITE_API_BASE_URL`.
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Environment
+Create `.env.local` (or set in your host):
+```
+VITE_API_BASE_URL=https://lamar-backend-api.onrender.com/api
+```
+
+## Key Flows
+- Patient intake form with validation
+- Confirmation modals for:
+  - MRN exists (name mismatch)
+  - NPI exists (name mismatch)
+  - Duplicate order for same MRN + medication
+- PDF upload (drag/drop or click) → sends file to backend `/api/records/extract` → auto-fills textarea
+- After successful order creation → auto-generate care plan (.txt) and download
+
+## Scripts
+```bash
+npm run dev       # start dev server
+npm run build     # production build
+npm run preview   # preview build locally
+npm run lint      # lint
+```
+
+## Project Structure (key paths)
+```
+lamar-frontend/
+  src/
+    pages/CarePlanForm.tsx   # primary intake form
+    lib/api.ts               # API client helpers
+    hooks/                   # react hooks
+    components/ui/           # shadcn ui primitives
+  public/                    # static assets
+  README.md
 ```
