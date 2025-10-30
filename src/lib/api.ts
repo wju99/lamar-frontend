@@ -273,3 +273,27 @@ export async function createPatientOrder(
   return data as PatientOrderResponse;
 }
 
+// Upload a PDF and receive extracted text from backend
+export async function extractRecordsText(file: File): Promise<string> {
+  const API_BASE_URL =
+    typeof window !== 'undefined' && window.location.hostname === 'localhost'
+      ? 'http://localhost:8000/api'
+      : import.meta.env.VITE_API_BASE_URL || 'https://lamar-backend-api.onrender.com/api';
+
+  const form = new FormData();
+  form.append('file', file);
+
+  const response = await fetch(`${API_BASE_URL}/records/extract`, {
+    method: 'POST',
+    body: form,
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    const message = data?.error || 'Failed to extract records text from PDF';
+    const error: ApiError = { message, detail: data };
+    throw error;
+  }
+  return (data?.extracted_text as string) || '';
+}
+

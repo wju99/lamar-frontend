@@ -1,14 +1,16 @@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { useEffect, useRef } from 'react';
-import { Plus, X, Loader2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Plus, X, Loader2, Upload, FileText } from 'lucide-react';
+import { useDropzone } from 'react-dropzone';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { extractRecordsText } from '@/lib/api';
 import { useCreatePatientOrder } from '@/hooks/useCreatePatientOrder';
 import type { PatientOrderPayload } from '@/lib/api';
 
@@ -58,9 +60,44 @@ export function CarePlanForm() {
 
   const additionalDiagnoses = watch('additional_diagnoses') || [];
   const medicationHistory = watch('medication_history') || [];
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [isExtracting, setIsExtracting] = useState(false);
   
   // Track if we just submitted to distinguish between confirmation-needed vs success
   const hasJustSubmittedRef = useRef(false);
+  
+  // PDF upload handler
+  const handlePdfUpload = async (file: File) => {
+    setIsExtracting(true);
+    setUploadedFileName(file.name);
+    try {
+      const text = await extractRecordsText(file);
+      setValue('records_text', text, { shouldValidate: true });
+    } catch (err) {
+      console.error('Failed to extract PDF text', err);
+      setUploadedFileName(null);
+      // Could show toast error here
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
+  // Dropzone configuration
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    accept: {
+      'application/pdf': ['.pdf']
+    },
+    maxFiles: 1,
+    onDrop: (acceptedFiles) => {
+      if (acceptedFiles[0]) {
+        handlePdfUpload(acceptedFiles[0]);
+      }
+    },
+    onDropRejected: () => {
+      // Could show toast error for invalid file type
+      console.error('Invalid file type. Please upload a PDF file.');
+    }
+  });
 
   // Watch for confirmationError to prevent form reset and auto-trigger care plan download
   useEffect(() => {
@@ -333,12 +370,60 @@ export function CarePlanForm() {
 
                 <div className="space-y-2">
                   <Label htmlFor="records_text" className="text-lamar-charcoal font-medium text-left block">
-                    Records Text
+                    Patient Records
                   </Label>
+                  
+                  {/* PDF Upload Dropzone */}
+                  <div
+                    {...getRootProps()}
+                    className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
+                      isDragActive
+                        ? 'border-lamar-pink bg-lamar-pink/5'
+                        : 'border-gray-300 hover:border-lamar-pink hover:bg-gray-50'
+                    } ${isExtracting ? 'opacity-50 pointer-events-none' : ''}`}
+                  >
+                    <input {...getInputProps()} />
+                    {isExtracting ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <Loader2 className="h-8 w-8 animate-spin text-lamar-pink" />
+                        <p className="text-sm text-lamar-grey">Extracting text from PDF...</p>
+                      </div>
+                    ) : uploadedFileName ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <FileText className="h-8 w-8 text-lamar-pink" />
+                        <p className="text-sm font-medium text-lamar-charcoal">{uploadedFileName}</p>
+                        <p className="text-xs text-lamar-grey">Text extracted successfully</p>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setUploadedFileName(null);
+                            setValue('records_text', '');
+                          }}
+                          className="mt-2 bg-transparent hover:bg-gray-50 text-lamar-charcoal"
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center gap-2">
+                        <Upload className="h-8 w-8 text-lamar-grey" />
+                        <p className="text-sm text-lamar-charcoal">
+                          {isDragActive ? 'Drop PDF here' : 'Drag & drop a PDF file here, or click to select'}
+                        </p>
+                        <p className="text-xs text-lamar-grey">PDF files only</p>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <p className="text-sm text-lamar-grey text-center">or enter text manually below</p>
+                  
                   <Textarea
                     id="records_text"
                     {...register('records_text')}
-                    placeholder="Enter medical records notes..."
+                    placeholder="Enter medical records notes or upload a PDF above..."
                     rows={4}
                     className="border-gray-200 rounded-lg focus:border-lamar-pink focus:ring-lamar-pink"
                   />
