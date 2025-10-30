@@ -1,20 +1,24 @@
 import { useState } from 'react';
-import { createPatientOrder, type PatientOrderPayload, type ApiError } from '@/lib/api';
+import { createPatientOrder, type PatientOrderPayload, type ApiError, type ConfirmationError } from '@/lib/api';
 import { toast } from 'sonner';
 
 interface UseCreatePatientOrderReturn {
   mutate: (payload: PatientOrderPayload) => Promise<void>;
   isLoading: boolean;
   error: string | null;
+  confirmationError: ConfirmationError | null;
+  setConfirmationError: (error: ConfirmationError | null) => void;
 }
 
 export function useCreatePatientOrder(): UseCreatePatientOrderReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmationError, setConfirmationError] = useState<ConfirmationError | null>(null);
 
   const mutate = async (payload: PatientOrderPayload) => {
     setIsLoading(true);
     setError(null);
+    setConfirmationError(null);
 
     try {
       const response = await createPatientOrder(payload);
@@ -23,6 +27,21 @@ export function useCreatePatientOrder(): UseCreatePatientOrderReturn {
       });
     } catch (err) {
       const apiError = err as ApiError;
+      
+      // Check if this is a confirmation-required error with issues
+      if (apiError.detail && typeof apiError.detail === 'object' && !Array.isArray(apiError.detail)) {
+        const confirmationErr = apiError.detail as ConfirmationError;
+        if (confirmationErr.requires_confirmation && confirmationErr.issues) {
+          // Set confirmation error instead of regular error - this will trigger modal
+          console.log('Setting confirmation error in hook:', confirmationErr);
+          setConfirmationError(confirmationErr);
+          setIsLoading(false);
+          return; // Don't throw, just return so modal can be shown
+        }
+      }
+      
+      console.log('API error but not confirmation error:', apiError);
+      
       // Ensure errorMessage is always a string
       let errorMessage = 'An error occurred while submitting the form.';
       
@@ -77,6 +96,6 @@ export function useCreatePatientOrder(): UseCreatePatientOrderReturn {
     }
   };
 
-  return { mutate, isLoading, error };
+  return { mutate, isLoading, error, confirmationError, setConfirmationError };
 }
 

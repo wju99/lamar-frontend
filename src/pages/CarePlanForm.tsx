@@ -1,6 +1,7 @@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
+import { useEffect, useRef } from 'react';
 import { Plus, X, Loader2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -38,7 +39,7 @@ const formSchema = z.object({
 type FormData = z.infer<typeof formSchema>;
 
 export function CarePlanForm() {
-  const { mutate, isLoading, error } = useCreatePatientOrder();
+  const { mutate, isLoading, error, confirmationError, setConfirmationError } = useCreatePatientOrder();
   const {
     register,
     handleSubmit,
@@ -56,8 +57,33 @@ export function CarePlanForm() {
 
   const additionalDiagnoses = watch('additional_diagnoses') || [];
   const medicationHistory = watch('medication_history') || [];
+  
+  // Track if we just submitted to distinguish between confirmation-needed vs success
+  const hasJustSubmittedRef = useRef(false);
 
-  const onSubmit = async (data: FormData) => {
+  // Watch for confirmationError to prevent form reset
+  useEffect(() => {
+    // If we just submitted and confirmationError was set, don't reset the form
+    if (hasJustSubmittedRef.current && confirmationError) {
+      hasJustSubmittedRef.current = false;
+      // Modal will be shown, form should stay as-is
+      return;
+    }
+    
+    // If we just submitted and no confirmationError, it was successful
+    if (hasJustSubmittedRef.current && !confirmationError && !isLoading) {
+      hasJustSubmittedRef.current = false;
+      reset();
+      setConfirmationError(null);
+    }
+  }, [confirmationError, isLoading, reset, setConfirmationError]);
+
+  const submitForm = async (
+    data: FormData, 
+    confirmPatientMismatch = false,
+    confirmProviderMismatch = false,
+    confirmDuplicateOrder = false
+  ) => {
     try {
       const payload: PatientOrderPayload = {
         first_name: data.first_name,
@@ -76,14 +102,42 @@ export function CarePlanForm() {
             ? data.medication_history
             : undefined,
         records_text: data.records_text,
+        confirm_patient_name_mismatch: confirmPatientMismatch,
+        confirm_provider_name_mismatch: confirmProviderMismatch,
+        confirm_duplicate_order: confirmDuplicateOrder,
       };
 
+      hasJustSubmittedRef.current = true;
       await mutate(payload);
-      reset();
+      // Don't reset here - let useEffect handle it based on confirmationError state
     } catch (err) {
+      hasJustSubmittedRef.current = false;
       // Error handling is done in the hook
       console.error('Form submission error:', err);
     }
+  };
+
+  const onSubmit = async (data: FormData) => {
+    await submitForm(data, false, false, false);
+  };
+
+  const handleConfirmProceed = () => {
+    if (confirmationError && confirmationError.issues) {
+      // Get current form data and resubmit with appropriate confirmation flags
+      const formData = watch();
+      const issues = confirmationError.issues;
+      
+      // Determine which flags to set based on which issues are present
+      const confirmPatient = !!issues.patient;
+      const confirmProvider = !!issues.provider;
+      const confirmOrder = !!issues.order;
+      
+      submitForm(formData, confirmPatient, confirmProvider, confirmOrder);
+    }
+  };
+
+  const handleCancel = () => {
+    setConfirmationError(null);
   };
 
   const addAdditionalDiagnosis = () => {
@@ -402,10 +456,118 @@ export function CarePlanForm() {
                 )}
               </Button>
             </div>
-          </form>
+            </form>
+          </div>
         </div>
+        
+        {/* Confirmation Modal for Multiple Issues */}
+        {confirmationError && confirmationError.issues && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6 border border-gray-200 max-h-[90vh] overflow-y-auto">
+              <h3 className="text-xl font-semibold text-lamar-charcoal mb-4">
+                {confirmationError.issues.order 
+                  ? 'Duplicate Order Warning' 
+                  : confirmationError.issues.patient && confirmationError.issues.provider
+                  ? 'Name Mismatch Detected'
+                  : confirmationError.issues.patient
+                  ? 'Patient Name Mismatch'
+                  : 'Provider Name Mismatch'}
+              </h3>
+              
+              <div className="mb-6 space-y-4">
+                {/* Order Issue */}
+                {confirmationError.issues.order && (
+                  <Alert variant="destructive" className="mb-4">
+                    <AlertDescription>
+                      Patient has already placed an order for <strong>{confirmationError.issues.order.medication_name}</strong>. Would you like to still proceed?
+                    </AlertDescription>
+                  </Alert>
+                )}
+                
+                {/* Patient/Provider Issues (shown together if both exist) */}
+                {(confirmationError.issues.patient || confirmationError.issues.provider) && (
+                  <Alert variant="destructive" className="mb-4">
+                    <AlertDescription>
+                      {confirmationError.issues.patient && confirmationError.issues.provider
+                        ? "Both patient and provider name mismatches detected. Please review before proceeding."
+                        : confirmationError.issues.patient
+                        ? `Patient with MRN '${confirmationError.issues.patient.mrn}' already exists. Would you like to proceed with creating a new order for this existing patient?`
+                        : confirmationError.issues.provider
+                        ? `Provider with NPI '${confirmationError.issues.provider.npi}' already exists. Would you like to proceed with updating the provider name?`
+                        : ''}
+                    </AlertDescription>
+                  </Alert>
+                )}
+                
+                {/* Patient Details */}
+                {confirmationError.issues.patient && (
+                  <div className="space-y-2 text-sm text-lamar-grey border-l-4 border-lamar-pink pl-4 py-2">
+                    <div className="font-semibold text-lamar-charcoal mb-2">Patient Information:</div>
+                    <div>
+                      <span className="font-medium text-lamar-charcoal">Existing Patient:</span>{' '}
+                      {confirmationError.issues.patient.existing_name}
+                    </div>
+                    <div>
+                      <span className="font-medium text-lamar-charcoal">You Entered:</span>{' '}
+                      {confirmationError.issues.patient.submitted_name}
+                    </div>
+                    <div>
+                      <span className="font-medium text-lamar-charcoal">MRN:</span>{' '}
+                      {confirmationError.issues.patient.mrn}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Provider Details */}
+                {confirmationError.issues.provider && (
+                  <div className="space-y-2 text-sm text-lamar-grey border-l-4 border-lamar-purple pl-4 py-2">
+                    <div className="font-semibold text-lamar-charcoal mb-2">Provider Information:</div>
+                    <div>
+                      <span className="font-medium text-lamar-charcoal">Existing Provider:</span>{' '}
+                      {confirmationError.issues.provider.existing_name}
+                    </div>
+                    <div>
+                      <span className="font-medium text-lamar-charcoal">You Entered:</span>{' '}
+                      {confirmationError.issues.provider.submitted_name}
+                    </div>
+                    <div>
+                      <span className="font-medium text-lamar-charcoal">NPI:</span>{' '}
+                      {confirmationError.issues.provider.npi}
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              <div className="flex gap-3 justify-between">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleCancel}
+                  className="px-6"
+                  disabled={isLoading}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleConfirmProceed}
+                  disabled={isLoading}
+                  className="px-6 bg-gradient-lamar text-white font-semibold hover:opacity-90 transition-opacity"
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Proceeding...
+                    </>
+                  ) : (
+                    'Proceed Anyway'
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-    </div>
-  );
-}
+    );
+  }
 

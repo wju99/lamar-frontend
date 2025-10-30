@@ -1,6 +1,21 @@
-// Get API base URL from environment variable with fallback for local development
-const API_BASE_URL =
-  (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000') + '/api';
+// Get API base URL - automatically use localhost backend when running on localhost:5173
+const getApiBaseUrl = (): string => {
+  // Check if we're running on localhost (development)
+  const isLocalhost = 
+    window.location.hostname === 'localhost' || 
+    window.location.hostname === '127.0.0.1' ||
+    window.location.hostname === '';
+  
+  if (isLocalhost) {
+    // Use local backend for local development
+    return 'http://localhost:8000/api';
+  }
+  
+  // For production, use environment variable or fallback to production URL
+  return (import.meta.env.VITE_API_BASE_URL || 'https://lamar-backend-api.onrender.com') + '/api';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 export interface PatientOrderPayload {
   first_name: string;
@@ -13,6 +28,9 @@ export interface PatientOrderPayload {
   medication_name: string;
   medication_history?: string[];
   records_text: string;
+  confirm_patient_name_mismatch?: boolean;
+  confirm_provider_name_mismatch?: boolean;
+  confirm_duplicate_order?: boolean;
 }
 
 export interface PatientOrderResponse {
@@ -29,8 +47,31 @@ export interface ValidationError {
 
 export interface ApiError {
   message: string;
-  detail?: string | ValidationError[];
+  detail?: string | ValidationError[] | ConfirmationError;
 }
+
+export interface ConfirmationIssues {
+  patient?: {
+    existing_name: string;
+    submitted_name: string;
+    mrn: string;
+  };
+  provider?: {
+    existing_name: string;
+    submitted_name: string;
+    npi: string;
+  };
+  order?: {
+    medication_name: string;
+    existing_order_id: number;
+  };
+}
+
+export interface ConfirmationError {
+  requires_confirmation: boolean;
+  issues: ConfirmationIssues;
+}
+
 
 export async function createPatientOrder(
   payload: PatientOrderPayload
@@ -58,7 +99,12 @@ export async function createPatientOrder(
   const contentType = response.headers.get('content-type');
   const isJson = contentType?.includes('application/json');
   
-  let data: PatientOrderResponse | { message?: string; detail?: string };
+  let data: PatientOrderResponse | { 
+    message?: string; 
+    detail?: string | ValidationError[] | ConfirmationError;
+    requires_confirmation?: boolean;
+    issues?: ConfirmationIssues;
+  };
   
   if (isJson) {
     try {
@@ -90,25 +136,73 @@ export async function createPatientOrder(
 
   if (!response.ok) {
     // At this point, data is JSON but contains error information
+    console.log('Response not OK. Status:', response.status, 'Data:', data);
+    
     const errorData = data as {
       message?: string;
-      detail?: string | ValidationError[];
+      detail?: string | ValidationError[] | ConfirmationError;
+      requires_confirmation?: boolean;
+      issues?: ConfirmationIssues;
     };
 
     let errorMessage = '';
-    let errorDetail: string | ValidationError[] | undefined;
+    let errorDetail: string | ValidationError[] | ConfirmationError | undefined;
 
     // Handle Django Ninja validation errors (422)
-    if (response.status === 422 && Array.isArray(errorData.detail)) {
-      // Format validation errors into a readable message
-      const validationErrors = errorData.detail
-        .map((err: ValidationError) => {
-          const field = err.loc.slice(1).join('.');
-          return `${field}: ${err.msg}`;
-        })
-        .join('; ');
-      errorMessage = `Validation error: ${validationErrors}`;
-      errorDetail = errorData.detail;
+    if (response.status === 422) {
+      console.log('422 status. Checking errorData:', errorData);
+      console.log('requires_confirmation:', errorData.requires_confirmation, 'issues:', errorData.issues);
+      
+      // Check if this is a confirmation-required error with issues (JsonResponse format)
+      if (errorData.requires_confirmation && errorData.issues) {
+        const confirmationError: ConfirmationError = {
+          requires_confirmation: true,
+          issues: errorData.issues
+        };
+        errorDetail = confirmationError;
+        errorMessage = 'Confirmation required before proceeding';
+        
+        console.log('Confirmation error detected:', confirmationError);
+        
+        const error: ApiError = {
+          message: errorMessage,
+          detail: errorDetail,
+        };
+        throw error;
+      }
+      
+      console.log('422 response but not confirmation error. errorData:', errorData);
+      
+      // Check if this is a confirmation-required error in detail field (HttpError format - legacy)
+      if (typeof errorData.detail === 'object' && errorData.detail !== null && !Array.isArray(errorData.detail)) {
+        const confirmationError = errorData.detail as ConfirmationError;
+        if (confirmationError.requires_confirmation && confirmationError.issues) {
+          // This is a confirmation-required error
+          errorDetail = confirmationError;
+          errorMessage = 'Confirmation required before proceeding';
+          
+          const error: ApiError = {
+            message: errorMessage,
+            detail: errorDetail,
+          };
+          throw error;
+        }
+      }
+      
+      if (Array.isArray(errorData.detail)) {
+        // Format validation errors into a readable message
+        const validationErrors = errorData.detail
+          .map((err: ValidationError) => {
+            const field = err.loc.slice(1).join('.');
+            return `${field}: ${err.msg}`;
+          })
+          .join('; ');
+        errorMessage = `Validation error: ${validationErrors}`;
+        errorDetail = errorData.detail;
+      } else if (typeof errorData.detail === 'string') {
+        errorMessage = errorData.detail;
+        errorDetail = errorData.detail;
+      }
     } else if (response.status === 400) {
       // Handle 400 Bad Request errors (e.g., duplicate MRN, IntegrityError)
       // Django Ninja HttpError returns the message in "detail" field
